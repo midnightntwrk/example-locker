@@ -1,0 +1,58 @@
+// This file is part of example-locker.
+// Copyright (C) 2026 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.22.0;
+
+import CompactStandardLibrary;
+
+export enum LockerStatus { AVAILABLE, RENTED }
+
+export struct Locker {
+  status:   LockerStatus;
+  codeHash: Bytes<32>;
+}
+
+// export ledger is required for fields to appear in the TypeScript Ledger type
+export ledger lockers: Map<Uint<64>, Locker>;
+export ledger totalLockers: Counter;
+
+// The renter's secret code — declared here, implemented in witnesses.ts.
+// Injected at proof-generation time; never included in any public transcript.
+witness myCode(): Bytes<32>;
+
+// Commitment: hash of the secret code with a domain separator.
+// Stored on-chain instead of the code itself.
+circuit codeCommitment(code: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "locker:v1:"), code]);
+}
+
+export circuit addLocker(): [] {
+  const id = totalLockers.read() as Uint<64>;
+  lockers.insert(id, Locker { status: LockerStatus.AVAILABLE, codeHash: pad(32, "") });
+  totalLockers.increment(1);
+}
+
+// The locker ID is a public circuit argument — disclose() marks it for the ledger.
+// The secret code comes from the witness and never appears in any transcript.
+export circuit rent(id: Uint<64>): [] {
+  const publicId = disclose(id);
+  assert(lockers.member(publicId), "locker does not exist");
+  const box = lockers.lookup(publicId);
+  assert(box.status == LockerStatus.AVAILABLE, "locker already rented");
+  lockers.insert(publicId, Locker {
+    status:   LockerStatus.RENTED,
+    codeHash: disclose(codeCommitment(myCode()))
+  });
+}
+
+// Proves knowledge of the code without revealing it.
+// If the code is wrong, the assert fails and the transaction is rejected.
+export circuit open(id: Uint<64>): [] {
+  const publicId = disclose(id);
+  assert(lockers.member(publicId), "locker does not exist");
+  const box = lockers.lookup(publicId);
+  assert(box.status == LockerStatus.RENTED, "locker is not rented");
+  assert(box.codeHash == codeCommitment(myCode()), "wrong combination");
+  lockers.insert(publicId, Locker { status: LockerStatus.AVAILABLE, codeHash: pad(32, "") });
+}
