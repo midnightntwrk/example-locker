@@ -7,7 +7,7 @@
 
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import * as LockerContract from '../../contract/src/managed/locker/contract/index.js';
-import { witnesses, createLockerPrivateState, setCode, type LockerPrivateState } from '../../contract/src/witnesses.js';
+import { witnesses, createLockerPrivateState, setCombination, type LockerPrivateState } from '../../contract/src/witnesses.js';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
@@ -95,16 +95,38 @@ export const joinContract = async (
 
 // ── Circuit calls ─────────────────────────────────────────────────────────────
 
-export const addLocker = (c: DeployedLockerContract) => c.callTx.addLocker();
-
-export const rent = async (c: DeployedLockerContract, id: bigint, combination: number) => {
-  setCode(combination);
-  await c.callTx.rent(id);
+// Rents a locker and commits the combination hash in one transaction.
+// Returns the assigned locker ID by reading totalLockers after the call
+// (new lockers) or the queue state (reused lockers). Since the contract handles
+// both cases internally, the CLI just needs the combination.
+export const rent = async (
+  c: DeployedLockerContract,
+  providers: LockerProviders,
+  combination: number,
+): Promise<bigint> => {
+  setCombination(combination);
+  await c.callTx.rent();
+  // The assigned ID is the current totalLockers value if a new locker was created,
+  // but for reused lockers it could be lower. Read ledger state to find it.
+  const state = await getLedgerState(providers, c.deployTxData.public.contractAddress);
+  return state?.totalLockers ?? 0n;
 };
 
-export const open = async (c: DeployedLockerContract, id: bigint, combination: number) => {
-  setCode(combination);
-  await c.callTx.open(id);
+export const vacate = async (c: DeployedLockerContract, id: bigint, combination: number) => {
+  setCombination(combination);
+  await c.callTx.vacate(id);
+};
+
+// Returns the list of locker IDs currently in the bank, available for reuse.
+export const getAvailableLockers = async (
+  providers: LockerProviders,
+  contractAddress: ContractAddress,
+): Promise<bigint[]> => {
+  assertIsContractAddress(contractAddress);
+  const state = await providers.publicDataProvider.queryContractState(contractAddress);
+  if (!state) return [];
+  const ledgerState = LockerContract.ledger(state.data);
+  return [...ledgerState.lockerBank];
 };
 
 // ── Wallet ────────────────────────────────────────────────────────────────────

@@ -107,35 +107,34 @@ const mainLoop = async (
     const dust = await dustLabel(walletCtx.wallet);
     const choice = await rli.question(
       `\n${D}\n  Locker Actions${dust ? `                     DUST: ${dust}` : ''}\n${D}\n` +
-      `  [1] Add a new locker\n  [2] Rent a locker\n  [3] Open a locker\n  [4] Show locker count\n  [5] Exit\n${D}\n> `,
+      `  [1] Rent a locker\n  [2] Vacate a locker\n  [3] Show locker status\n  [4] Exit\n${D}\n> `,
     );
 
     switch (choice.trim()) {
 
-      case '1': // Add locker
+      case '1': // Rent
         try {
-          const state = await api.getLedgerState(providers, address);
-          const nextId = state ? Number(state.totalLockers) : '?';
-          await api.withStatus('Adding locker', () => api.addLocker(contract));
-          console.log(`\n  Locker added — ID: ${nextId}\n`);
-        } catch (e) { console.log(`\n  ✗ ${e instanceof Error ? e.message : e}\n`); }
-        break;
-
-      case '2': // Rent locker
-        try {
-          const id = await askId(rli);
+          // Show available (vacated) lockers before asking for a combination so the
+          // user knows whether they are getting a fresh slot or a reused one.
+          const vacated = await api.getAvailableLockers(providers, address);
+          if (vacated.length > 0) {
+            console.log(`\n  Available lockers for reuse: ${vacated.join(', ')}`);
+            console.log('  One of these slots will be reused.\n');
+          } else {
+            console.log('\n  No vacated lockers - a new slot will be created.\n');
+          }
           const combo = await askCombination(rli, 'Set a combination for this locker');
-          await api.withStatus(`Renting locker ${id}`, () => api.rent(contract, id, combo));
+          const id = await api.withStatus('Renting locker', () => api.rent(contract, providers, combo));
           console.log(`\n  Locker ${id} rented. Combination hash committed on-chain.\n  The digits never appeared in any transaction transcript.\n`);
         } catch (e) { console.log(`\n  ✗ ${e instanceof Error ? e.message : e}\n`); }
         break;
 
-      case '3': // Open locker
+      case '2': // Vacate
         try {
           const id = await askId(rli);
           const combo = await askCombination(rli, 'Enter combination');
-          await api.withStatus(`Opening locker ${id}`, () => api.open(contract, id, combo));
-          console.log(`\n  Locker ${id} is now available.\n  ZK proof verified your combination without revealing it.\n`);
+          await api.withStatus(`Vacating locker ${id}`, () => api.vacate(contract, id, combo));
+          console.log(`\n  Locker ${id} is now available and queued for reuse.\n  ZK proof verified your combination without revealing it.\n`);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           if (msg.includes('locker is not rented')) {
@@ -148,15 +147,22 @@ const mainLoop = async (
         }
         break;
 
-      case '4': // Show count
+      case '3': // Show status
         try {
           const state = await api.getLedgerState(providers, address);
           const total = state ? Number(state.totalLockers) : 0;
-          console.log(`\n  Total lockers: ${total}${total > 0 ? `  (IDs 0 – ${total - 1})` : ''}\n`);
-        } catch (e) { console.log(`\n  ✗ ${e instanceof Error ? e.message : e}\n`); }
+          const available = await api.getAvailableLockers(providers, address);
+          console.log(`\n  Total lockers: ${total}${total > 0 ? `  (IDs 1 - ${total})` : ''}`);
+          if (available.length > 0) {
+            console.log(`  Available for reuse: ${available.join(', ')}`);
+          } else {
+            console.log('  No available lockers.');
+          }
+          console.log('');
+        } catch (e) { console.log(`\n  x ${e instanceof Error ? e.message : e}\n`); }
         break;
 
-      case '5': return;
+      case '4': return;
       default: console.log(`\n  Invalid option.\n`);
     }
   }
