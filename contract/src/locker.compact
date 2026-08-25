@@ -1,0 +1,73 @@
+// This file is part of example-locker.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.22.0;
+
+import CompactStandardLibrary;
+
+export enum LockerStatus { AVAILABLE, RENTED }
+
+// A future locker variant could add a `contents` field without changing the combination commitment or access control model.
+export struct Locker {
+  status:   LockerStatus;
+  codeHash: Bytes<32>;
+}
+
+// export ledger is required for fields to appear in the TypeScript Ledger type
+export ledger lockers: Map<Uint<64>, Locker>;
+export ledger totalLockers: Counter;
+
+// Bank of locker IDs available for reuse. Populated by vacate(), drained by rent().
+// Compact's List type only supports front operations (pushFront/popFront), making
+// this a stack (last vacated = first reused). FIFO would require the Map + two
+// Counter approach. For an example repo the order is not significant.
+export ledger lockerBank: List<Uint<64>>;
+
+// The user's secret combination - declared here, implemented in witnesses.ts.
+// Injected at proof-generation time via private state; never included in any public transcript.
+witness myCombination(): Bytes<32>;
+
+// Commitment: hash of the combination with a domain separator.
+// The hash is stored on-chain; the combination itself is never stored or transmitted.
+circuit combinationCommitment(combination: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "locker:v1:"), combination]);
+}
+
+// Internal - creates a new locker slot and returns its 1-indexed ID.
+// Called by rent() only when the bank is empty. The new locker goes directly
+// to the renter - it is never added to the bank.
+circuit addLocker(): Uint<64> {
+  totalLockers.increment(1);
+  return totalLockers.read() as Uint<64>;
+}
+
+// Internal - rents a locker from the bank, removing it in the same step.
+circuit rentFromBank(): Uint<64> {
+  const id = lockerBank.head().value;
+  lockerBank.popFront();
+  return id;
+}
+
+// Rents a locker and commits the combination hash in one transaction.
+// Reuses a locker from the bank if one is available, otherwise creates a new one.
+// The combination is provided via the myCombination witness and never appears on-chain.
+export circuit rent(): [] {
+  const id = disclose(lockerBank.isEmpty() ? addLocker() : rentFromBank());
+  lockers.insert(id, Locker {
+    status:   LockerStatus.RENTED,
+    codeHash: disclose(combinationCommitment(myCombination()))
+  });
+}
+
+// Proves knowledge of the combination without revealing it, then returns the locker
+// to the bank so rent() can reuse the slot.
+export circuit vacate(id: Uint<64>): [] {
+  const publicId = disclose(id);
+  assert(lockers.member(publicId), "locker does not exist");
+  const box = lockers.lookup(publicId);
+  assert(box.status == LockerStatus.RENTED, "locker is not rented");
+  assert(box.codeHash == combinationCommitment(myCombination()), "wrong combination");
+  lockers.insert(publicId, Locker { ...box, status: LockerStatus.AVAILABLE });
+  lockerBank.pushFront(publicId);
+}

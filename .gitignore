@@ -1,0 +1,16 @@
+# Node.js
+node_modules/
+dist/
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Midnight level DB
+midnight-level-db/
+
+# macOS
+.DS_Store
+
+# Compact — generated output, rebuilt via: npm run compact
+contract/src/managed/
