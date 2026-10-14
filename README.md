@@ -1,3 +1,10 @@
+> [!WARNING]
+> **This repository is archived and no longer maintained.**
+>
+> `example-locker` was never built out beyond the repository template.
+>
+> For working examples, start with the [learning path](https://github.com/midnightntwrk/midnight-examples#learning-path) in [midnight-examples](https://github.com/midnightntwrk/midnight-examples). This repo is read-only and will not be updated for future SDK releases.
+
 # Midnight Template Repository
 
 This GitHub repository should be used as a template when creating a new Midnight GitHub repository.
